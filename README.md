@@ -6,24 +6,24 @@ Recently, there have been wide swings in the growth rate of housing prices acros
 
 Here are some informations about the features:
 
-id: Unique ID for each home sold
-date: Date of the home sale
-price: Price of each home sold
-bedrooms: Number of bedrooms
-bathrooms: Number of bathrooms, where .5 accounts for a room with a toilet but no shower
-sqft_living: Square footage of the house interior living space
-sqft_lot: Square footage of the land space
-floors: Number of floors
-waterfront: Whether the house was overlooking the waterfront or not
-view: An index of how good the view of the property was (0-4)
-condition: An index on the condition of the apartment (1-5)
-grade: An index on the quality of building construction and design (1-13),
-sqft_above: The square footage of the interior housing space that is above ground level
-sqft_basement: The square footage of the interior housing space that is below ground level
-yr_built: The year the house was initially built
-yr_renovated: The year of the house’s last renovation
-zipcode: Zipcode area the house is in
-lat: Latitude
-long: Longitude
-sqft_living15: The square footage of interior housing living space for the nearest 15 neighbors
-sqft_lot15: The square footage of the land lots of the nearest 15 neighbors
+- id: Unique ID for each home sold
+- date: Date of the home sale
+- price: Price of each home sold
+- bedrooms: Number of bedrooms
+- bathrooms: Number of bathrooms, where .5 accounts for a room with a toilet but no shower
+- sqft_living: Square footage of the house interior living space
+- sqft_lot: Square footage of the land space
+- floors: Number of floors
+- waterfront: Whether the house was overlooking the waterfront or not
+- view: An index of how good the view of the property was (0-4)
+- condition: An index on the condition of the apartment (1-5)
+- grade: An index on the quality of building construction and design (1-13),
+- sqft_above: The square footage of the interior housing space that is above ground level
+- sqft_basement: The square footage of the interior housing space that is below ground level
+- yr_built: The year the house was initially built
+- yr_renovated: The year of the house’s last renovation
+- zipcode: Zipcode area the house is in
+- lat: Latitude
+- long: Longitude
+- sqft_living15: The square footage of interior housing living space for the nearest 15 neighbors
+- sqft_lot15: The square footage of the land lots of the nearest 15 neighbors
