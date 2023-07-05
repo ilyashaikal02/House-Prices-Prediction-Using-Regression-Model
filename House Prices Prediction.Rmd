@@ -1,0 +1,294 @@
+---
+title: 'House Prices Prediction '
+author: "Muhamad Ilyas Haikal"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    code_folding: hide
+    theme: cosmo
+    highlight: tango
+    toc: yes
+    number_section: no
+    toc_float:
+      collapsed: yes
+      smooth_scroll: yes
+    df_print: paged
+  pdf_document:
+    toc: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(GGally)
+library(MLmetrics)
+library(car)
+library(lmtest)
+```
+# 1. Background 
+Recently, there have been wide swings in the growth rate of housing prices across many countries. Housing prices tend to rise over time; however, accurately predicting them might be a difficult task. There are various factors that may influence the demand for a property. Additionally, it is extremely difficult to figure out which set of factors might explain buyers' behavior, since every buyer tends to have their own preferences such as house size, location, etc. In this document, I am going to predict housing prices in King County using a linear regression model, as well as find out which attribute plays the key role in determining the housing price. The dataset used was obtained from Kaggle (https://www.kaggle.com/datasets/harlfoxem/housesalesprediction) and consists of 21,613 observations.
+
+# 2. Data Preparation
+
+## 2.1 Data Inspection
+```{r}
+house <- read.csv("kc_house_data.csv")
+head(house)
+
+```
+```{r}
+glimpse(house)
+```
+Here are some informations about the features:
+
+- id: Unique ID for each home sold
+- date: Date of the home sale
+- price: Price of each home sold
+- bedrooms: Number of bedrooms
+- bathrooms: Number of bathrooms, where .5 accounts for a room with a toilet but no shower
+- sqft_living: Square footage of the house interior living space
+- sqft_lot: Square footage of the land space
+- floors: Number of floors
+- waterfront: Whether the house was overlooking the waterfront or not
+- view: An index of how good the view of the property was (0-4)
+- condition: An index on the condition of the apartment (1-5)
+- grade: An index on the quality of building construction and design (1-13),
+- sqft_above: The square footage of the interior housing space that is above ground level
+- sqft_basement: The square footage of the interior housing space that is below ground level
+- yr_built: The year the house was initially built
+- yr_renovated: The year of the house’s last renovation
+- zipcode: Zipcode area the house is in
+- lat: Latitude
+- long: Longitude
+- sqft_living15: The square footage of interior housing living space for the nearest 15 neighbors
+- sqft_lot15: The square footage of the land lots of the nearest 15 neighbors
+
+We can drop id and date because it is not relevant with predicting house prices. Furthermore, since our data consists of housing prices in King County, we can drop zipcode, lat, and long. Inspecting the data further, we can see that waterfront is recognized as integer instead of categorical feature. So, we will correct it as well.
+
+```{r}
+house <- house %>% 
+  select(-c(id, date, zipcode, lat, long)) %>% 
+  mutate(waterfront = as.factor(waterfront)) 
+```
+
+## 2.2 Missing and Duplicated Values
+Checking whether the training set has any missing or duplicated values.
+```{r}
+colSums(is.na(house))
+```
+```{r}
+sum(duplicated(house))
+```
+The training set does not have any missing value, but it has 6 duplicated values. I personally think that although some houses in the regency might be built exactly the same, it is enough to just pick one of them in modeling. This is because duplicated values, in a regression model, might systematically bias regression estimates. So, I will drop these missing values.
+
+```{r}
+house <- house[!duplicated(house), ]
+```
+The data is now clean and ready to be used.
+
+# 3. Exploratory Data Analysis
+First, let’s see our data summary.
+```{r}
+summary(house)
+```
+The range of our target variable, price is quite big. I’m afraid there will be a lot of outliers in the data. Let’s check the distribution of house prices.
+
+```{r}
+hist(house$price,
+     col = "skyblue",
+     main = "Distribution of House Prices",
+     xlab = "House Price",
+     breaks = 30)
+```
+```{r}
+boxplot(house$price,
+        main = "Boxplot of House Prices",
+        col = "skyblue4")
+```
+We can see that the distribution of house prices looks like a normal distribution, with some data on the right tail that skewed the distribution. Furthermore, seeing the boxplot, we can see that there are lots of outliers in the data. I have planned to construct a model using Ordinary Least Square Linear Regression, and although it does not need the distribution of neither outcome nor independent variables to be of Gaussian (normal), it is very sensitive to outliers. Besides, outliers are considered to be anomaly in the data. So, I will trim the data as to remove some outliers.
+
+```{r}
+house_trim <- house %>% 
+  arrange(price) %>% 
+  slice_min(price, prop = 0.97)
+
+hist(house_trim$price,
+     col = "skyblue",
+     main = "Distribution of House Prices",
+     xlab = "House Price",
+     breaks = 20)
+```
+The distribution seems to be better. Now, let’s see the correlation between features in this dataset.
+```{r}
+ggcorr(house_trim, geom = "blank", label = T, label_size = 3, hjust = 1, size = 3, layout.exp = 2) +
+  geom_point(size = 8, aes(color = coefficient > 0, alpha = abs(coefficient) >= 0.5)) +
+  scale_alpha_manual(values = c("TRUE" = 0.25, "FALSE" = 0)) +
+  guides(color = F, alpha = F)
+```
+By looking at the correlation matrix, we can see that all variables are positively correlated with price. Furthermore, sqft_living, grade, sqft_above, and sqft_living15 seems to have strong correlations with price.
+
+## 3.1 Cross Validation
+Before proceeding to the modeling part, I will split the data into 2 sets: train set and test set. The reason behind this is pretty much straightforward. When we are creating a model, the main purpose is to be able to use it for predicting other data, i.e. data that the model has not seen. Thus, it is very important to evaluate the model’s out of sample accuracy, rather than only its accuracy on the training set (set containing data the model has learned from). I will split the data into 70% train set and 30% test set.
+
+```{r}
+RNGkind(sample.kind = "Rounding")
+set.seed(417)
+idx <- sample(nrow(house_trim), nrow(house_trim) * 0.7)
+train <- house_trim[idx, ]
+test <- house_trim[-idx, ]
+```
+
+# 4. Modeling 
+
+## 4.1 Multiple Linear Regression
+Let’s try to construct the model using 4 features that are strongly correlated with house prices: sqft_living, grade, sqft_above, and sqft_living15.
+
+```{r}
+summary(lm(price ~ sqft_living + grade + sqft_above + sqft_living15,
+           data = house))
+```
+We can see the goodness of fit of the model by looking at the adjusted R2 value. It tells us how well our dependent variable can be explained by our independent variables. Using those 4 features, we get adjusted R2
+value of 0.5421. It is quite poor. Let’s compare the result to the model with all the features included.
+
+```{r}
+model_all <- lm(price ~ ., data = house)
+summary(model_all)
+```
+When we use all the features, the adjusted R2 raised by quite a significant amount. It rose from 0.5421 to 0.6999. Let’s check the RMSE of our model in the test set to check the out-of-sample error. It measures on average, how far is our prediction from the actual data.
+
+```{r}
+RMSE(y_pred = predict(model_all, newdata = test),
+     y_true = test$price)
+```
+
+The RMSE is quite high. It is still a poor model. Since there are still statistically insignificant variables, and to improve our model even further, I will use backward stepwise regression. It is a method that iteratively examines the significance of every independent variables in a regression model. Backward stepwise regression begins with a model containing all possible variables, then deleting each variable whose absence decreases the AIC (Akaike Information Criterion / information loss) the most.
+
+```{r}
+model_back <- step(model_all, direction = "backward", trace = 0)
+summary(model_back)
+```
+```{r}
+RMSE(y_pred = predict(model_back, newdata = test),
+     y_true = test$price)
+```
+So, it turns out that the model with the least information loss is the model that uses all variables, with the optional sqft_basement variable. We can pretty much conclude the best multiple linear regression model that can be constructed with this data is pretty poor, with adjusted R2
+ value of 0.6999 and RMSE of 149611.2. Let’s first check whether the model fulfills all multiple linear regression assumption.
+
+## 4.2 Assumptions
+Let’s first check on the assumption of normality.
+```{r}
+hist(model_back$residuals,
+     col = "skyblue",
+     main = "Histogram of Residuals",
+     xlab = "Residuals")
+```
+```{r}
+nortest::ad.test(model_back$residuals)
+```
+I used the Anderson-Darling normality test instead of shapiro-wilk normality test because the data size is too large. From the histogram and the statistical test, we can see that the errors are not normally distributed. This might happen because of outliers in our data, and we must be cautious of using the model as the errors will not be around 0. Let’s now check on the homoscedasticity assumption.
+
+```{r}
+plot(model_back$fitted.values, model_back$residuals,
+     xlab = "Fitted Values",
+     ylab = "Residuals")
+abline(h = 0, col = "red")
+```
+```{r}
+bptest(model_back)
+```
+Since the p-value is less than 0.05, we reject the null hypothesis and conclude that our model violates the homoscedasticity assumption as well. This indicates that there are patterns that the model was unable to learn. Now the last assumption, multicollinearity.
+
+```{r}
+data.frame("VIF" = vif(model_back))
+```
+Since all VIF are below 10, we can conclude that multicollinearity is not present in our model. Looking at how the model violates 2 assumptions, it means that our model can still be improved upon, or maybe multiple linear regression is not good enough to find all the patterns in the data.
+
+## 4.3 Model Improvement
+Our data is skewed to begin with, thus it is prone to overfitting. I would like to see what will happen if we remove all outliers in the target variable, and log-transform all numeric variables in the data. This should help in transforming all variables’ distribution into a more normal-shaped bell curve, thus the model should not have overfitting problem. For the log transformation, since there are quite a few zeros in the data, I will add a constant and use log10(x+1) instead.
+
+```{r}
+log_tf <- function(x){
+  return(log10(x+1))
+}
+```
+```{r}
+house2 <- house %>% 
+  filter(price < quantile(house$price, 0.75) + 1.5 * IQR(house$price)) %>% 
+  mutate_if(is.numeric, log_tf)
+
+house2
+```
+
+Splitting the data into train and test set.
+```{r}
+set.seed(417)
+idx_tf <- sample(nrow(house2), nrow(house2) * 0.7)
+train_tf <- house2[idx_tf, ]
+test_tf <- house2[-idx_tf, ]
+```
+
+Creating multiple linear regression model using transformed data.
+
+```{r}
+model_tf <- step(object = lm(price ~ ., data = train_tf),
+                 direction = "backward",
+                 trace = F)
+
+summary(model_tf)
+```
+
+We ended up getting a lower adjusted R2 error. Let’s see the RMSE.
+
+```{r}
+predict_tf <- predict(model_tf, newdata = test_tf)
+RMSE(y_pred = 10^(predict_tf) - 1,
+     y_true = 10^(test_tf$price) - 1)
+```
+
+Although we get a lower adjusted R2 value, we ended up getting a lower RMSE value as well. Let’s check whether the new model violates linear model assumptions or not.
+
+```{r}
+hist(model_tf$residuals,
+     col = "skyblue",
+     main = "Histogram of Residuals",
+     xlab = "Residuals")
+```
+```{r}
+nortest::ad.test(model_tf$residuals)
+```
+Although the histogram seems slightly skewed, turns out that statistically, it is not normally distributed. So, the new model still violates the first assumption since the errors are not normally distributed.
+
+```{r}
+plot(model_tf$fitted.values, model_tf$residuals,
+     xlab = "Fitted Values",
+     ylab = "Residuals")
+abline(h = 0, col = "red")
+```
+```{r}
+bptest(model_tf)
+```
+The homoscedasticity assumption is also violated, which means that there are patterns that the model was unable to learn. Let’s check the last assumption, multicollinearity.
+
+```{r}
+data.frame("VIF" = vif(model_tf))
+```
+The new model turns out to violate multicollinearity assumption as well. I have tested that removing sqft_above will result in slightly decreased RMSE, but the previous two assumptions will still be violated by the model. It seems that for this data, it is not appropriate to use multiple linear regression model.
+
+# 5. Conclusion
+For predicting housing prices in King County, USA, the multiple linear regression performs poorly. Multiple linear regression was unable to caught every patterns in the data. The best adjusted R2 got in the multiple linear model is 0.6999 with RMSE of 149611.2. Removing every outliers and log-transforming numerical features did not help much either, as it decreases the adjusted R2 into 0.562, but also decreases RMSE into 136126.8 (which is still high). All the model also violates several linear regression model assumptions. It is recommended to use another machine learning methods such as decision tree, random forest, or deep learning for this data.
+
+# 6. References
+1. S. Borde, A. Rane, G. Shende, and S. Shetty, “Real estate investment advising using machine learning,” International Research Journal of Engineering and Technology (IRJET), vol. 4, no. 3, p. 1821, 2017.
+
+2. B. Trawinski, Z. Telec, J. Krasnoborski et al., “Comparison of expert algorithms with machine learning models for real estate appraisal,” in Proceedings of the 2017 IEEE International Conference on INnovations in Intelligent SysTems and Applications (INISTA), Gdynia, Poland, July 2017.
+
+3. V. Kontrimas and A. Verikas, “The mass appraisal of the real estate by computational intelligence,” Applied Soft Computing, vol. 11, no. 1, pp. 443–448, 2011.
+
+4. M. Woźniak, M. Graña, and E. Corchado, “A survey of multiple classifier systems as hybrid systems,” Information Fusion, vol. 16, pp. 3–17, 2014.
+
+5. J. R. Barr, E. A. Ellis, A. Kassab, C. L. Redfearn, N. N. Srinivasan, and K. B. Voris, “Home price index: a machine learning methodology,” International Journal of Semantic Computing, vol. 11, no. 1, pp. 111–133, 2017.
+
+
+
+
+
